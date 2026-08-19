@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Smart Live Dashboard</title>
-<!-- 鎖定穩定版 HLS.js，防止上游改版拖冧系統 -->
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
 <style>
   :root {
@@ -46,7 +45,6 @@
   .update-bar-container { width: 100%; height: 3px; background: #ffe0e6; border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
   .update-bar { height: 100%; background: #009688; width: 0%; transition: width 1s linear; }
 
-  /* 天氣 */
   .weather-loc-row { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
   .loc-title { font-size: 20px; font-weight: 900; color: #222; }
   .weather-status-pill { background: #e0f7fa; color: #00838f; font-size: 13px; font-weight: 800; padding: 4px 10px; border-radius: 14px; text-align: center; }
@@ -61,7 +59,6 @@
   .hl-pink-text { color: var(--accent-pink); font-weight: 900; font-size: 14px; }
   .capsule-val { font-size: 18px; font-weight: 900; margin-left: 4px; }
 
-  /* 逐時天氣 */
   .hourly-forecast-box { margin-top: 6px; border-top: 1px dashed var(--border-pink); padding-top: 6px; }
   .hourly-title-row { display: flex; justify-content: space-between; font-size: 13px; color: #222; margin-bottom: 6px; font-weight: 800; }
   .hourly-slots { display: flex; justify-content: space-between; text-align: center; padding: 0; }
@@ -70,7 +67,6 @@
   .h-temp { font-size: 16px; color: #ffb100; font-weight: 900; line-height: 1.1; }
   .h-rain { font-size: 11px; color: var(--accent-pink); font-weight: 800; }
 
-  /* 交通 */
   .transit-filter-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 6px; }
   .filter-chip { background: #f0f0f0; border: none; padding: 6px 12px; border-radius: 16px; font-size: 12px; font-weight: 800; color: #555; cursor: pointer; white-space: nowrap; }
   .filter-chip.active { background: #009688; color: #fff; }
@@ -90,7 +86,6 @@
   .eta-clock { font-size: 12px; color: #777; font-weight: 800; }
   .transit-card-sub { margin-top: 5px; padding-top: 5px; border-top: 1.5px dotted #e2e2e2; font-size: 11px; color: #666; text-align: right; font-weight: 700; }
 
-  /* 電台 */
   .radio-bar { background: #ffffff; border-radius: 25px; border: 2px solid var(--border-pink); padding: 8px 18px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
   .radio-info { display: flex; align-items: center; gap: 8px; }
   .radio-name { font-size: 15px; font-weight: 900; color: #222; }
@@ -137,6 +132,7 @@
             <div class="temp-display"><span id="temp-val-num">--</span><span class="temp-deg">°</span></div>
             <div class="temp-forecast-text" id="temp-range-text">今日預測：-- - --°C</div>
           </div>
+          <!-- 這個 Icon 現在會自動變換！ -->
           <div class="weather-icon-right" id="weather-cloud-icon">⛅</div>
         </div>
         <div class="weather-capsule-row">
@@ -187,9 +183,6 @@
   <audio id="audio-stream-player" preload="none"></audio>
 
 <script>
-  // ==========================================
-  // API 密鑰管理 (解決 Hardcode 及 GitHub 安全問題)
-  // ==========================================
   let ODPT_TOKEN = localStorage.getItem('ODPT_TOKEN') || '';
   window.setOdptToken = function() {
       let t = prompt("請輸入日本 ODPT API Token (留空則不更改):", ODPT_TOKEN);
@@ -200,7 +193,6 @@
           if(currentMode === 'JP') forceRefresh(); 
       }
   }
-  // ==========================================
 
   let currentMode = 'HK';
   let hkFilter = 'ALL';
@@ -216,7 +208,7 @@
       { name: 'RTHK 2', url: 'https://rthkaudio2-lh.akamaihd.net/i/radio2_1@355865/master.m3u8' },
       { name: 'RTHK 4', url: 'https://rthkaudio4-lh.akamaihd.net/i/radio4_1@355867/master.m3u8' }, 
       { name: 'RTHK 5', url: 'https://rthkaudio5-lh.akamaihd.net/i/radio5_1@355868/master.m3u8' },
-      { name: 'Metro Info', url: 'https://stream.metroradio.com.hk/997' } // 保留新城測試，不用無效的普通話台
+      { name: 'Metro Info', url: 'https://stream.metroradio.com.hk/997' }
     ],
     JP: [
       { name: 'NHK R1', url: 'https://radio-stream.nhk.jp/hls/live/2023229/nhkradiruakr1/master.m3u8' },
@@ -253,10 +245,8 @@
     }
   }
 
-  // 解決 2MB 每分鐘重複下載及城巴串行阻塞問題
   async function resolveBusStops() {
     if (BUS_STOPS_RESOLVED) return;
-    
     const cached = localStorage.getItem('busStopCache_v2');
     if (cached) {
         const cacheData = JSON.parse(cached);
@@ -350,7 +340,28 @@
     }
   }
 
-  // 精準時區運算系統 (解決 8 小時誤差)
+  // 轉換香港天文台 Icon
+  function getHkWeatherIcon(code) {
+      if (!code) return '⛅';
+      if (code >= 50 && code <= 52) return '☀️'; 
+      if (code >= 53 && code <= 54) return '⛅'; 
+      if (code >= 60 && code <= 61) return '☁️'; 
+      if (code >= 62 && code <= 65) return '🌧️'; 
+      if (code >= 70 && code <= 77) return '⛈️'; 
+      return '⛅';
+  }
+
+  // 轉換 Open-Meteo Icon
+  function getJpWeatherIcon(code) {
+      if (code === 0) return '☀️'; 
+      if (code === 1 || code === 2) return '⛅'; 
+      if (code === 3) return '☁️'; 
+      if (code >= 51 && code <= 67) return '🌧️'; 
+      if (code >= 71 && code <= 86) return '❄️'; 
+      if (code >= 95 && code <= 99) return '⛈️'; 
+      return '⛅';
+  }
+
   function getTzTimeObj(tzString) {
       const p = {};
       new Intl.DateTimeFormat('en-CA', {timeZone: tzString, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'}).formatToParts(new Date()).forEach(x => p[x.type] = x.value);
@@ -370,7 +381,6 @@
     const days = currentMode === 'HK' ? daysHK : daysJP;
     document.getElementById('date-display').innerText = `${p.month}月${p.day}日 (${days[target.getDay()]}) 🌸`;
 
-    // 真實零延遲倒數 (每秒刷新數字，無需依賴網絡)
     document.querySelectorAll('.eta-text[data-eta]').forEach(el => {
        const etaMs = parseInt(el.getAttribute('data-eta'));
        if(!isNaN(etaMs)) {
@@ -436,6 +446,11 @@
         if (tmTemp) document.getElementById('temp-val-num').innerText = tmTemp.value;
         const hum = data.humidity?.data?.[0]?.value;
         if (hum) document.getElementById('humidity-val-text').innerText = `${hum}%`;
+        
+        // 【智能替換香港天氣 Icon】
+        if (data.icon && data.icon.length > 0) {
+            document.getElementById('weather-cloud-icon').innerText = getHkWeatherIcon(data.icon[0]);
+        }
       }
       const fndRes = await fetchWithTimeout(`https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=fnd&lang=tc&_=${Date.now()}`);
       if (fndRes.ok) {
@@ -444,11 +459,10 @@
         if (today) {
           document.getElementById('weather-desc-text').innerText = today.forecastWeather;
           document.getElementById('temp-range-text').innerText = `今日預測：${today.forecastMintemp?.value} - ${today.forecastMaxtemp?.value}°C`;
-          document.getElementById('rain-val-text').innerText = today.PSR || '低'; // 已修正 PSR 欄位
+          document.getElementById('rain-val-text').innerText = today.PSR || '低'; 
         }
       }
       
-      // Open-Meteo 絕對時區對齊
       const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=22.39&longitude=113.97&hourly=temperature_2m,precipitation_probability&timezone=Asia%2FHong_Kong&forecast_days=2&_=${Date.now()}`);
       if (omRes.ok) {
         const omData = await omRes.json();
@@ -460,7 +474,7 @@
         
         for(let i=0; i<6; i++) {
           const idx = startIndex + i;
-          if(!omData.hourly.time[idx]) break; // 防越界
+          if(!omData.hourly.time[idx]) break; 
           const timeLabel = omData.hourly.time[idx].slice(11, 16);
           const temp = Math.round(omData.hourly.temperature_2m[idx]);
           const rain = omData.hourly.precipitation_probability[idx];
@@ -517,7 +531,6 @@
                   const first = matched[0];
                   lrtTrains[key].dest = first.dest_ch ? `往 ${first.dest_ch}` : lrtTrains[key].dest;
                   
-                  // 解決輕鐵疊字 Bug
                   let mTxt = first.time_ch || first.time_en;
                   let n = parseInt(mTxt);
                   lrtTrains[key].time = (mTxt === '-' || mTxt === '離開' || isNaN(n)) ? '即將抵達' : n + ' 分鐘';
@@ -549,7 +562,7 @@
         let etaClock = '--:--';
         let subText = '等候發車 / 暫無數據';
         let icon = '';
-        let actualDest = Array.isArray(cfg.destKw) ? cfg.destKw[0] : cfg.destKw; // Default fallback
+        let actualDest = Array.isArray(cfg.destKw) ? cfg.destKw[0] : cfg.destKw; 
 
         if (cfg.stopId) {
           try {
@@ -571,7 +584,7 @@
             if (validEtas.length > 0) {
               validEtas.sort((a,b) => new Date(a.eta).getTime() - new Date(b.eta).getTime());
               const first = validEtas[0];
-              if (first.dest_tc) actualDest = first.dest_tc; // 提取官方真實目的地 (例如: 灣仔北)
+              if (first.dest_tc) actualDest = first.dest_tc; 
               
               const etaMs = new Date(first.eta).getTime();
               const diff = Math.floor((etaMs - Date.now()) / 60000);
@@ -604,7 +617,7 @@
     container.innerHTML = cardsHtml;
   }
 
-  // === 日本天氣與交通 (加入真實 API 運算) ===
+  // === 日本天氣與交通 ===
   async function fetchJPWeatherData() {
     document.getElementById('weather-card-title').innerText = '東京リアルタイム天気';
     document.getElementById('loc-display-title').innerText = '豊島区 雑司が谷 🎯';
@@ -616,11 +629,15 @@
       document.getElementById('temp-range-text').innerText = `今日の予報：${Math.round(data.daily.temperature_2m_min[0])} - ${Math.round(data.daily.temperature_2m_max[0])}°C`;
       document.getElementById('rain-val-text').innerText = `${data.daily.precipitation_probability_max[0]}%`;
       const code = data.current.weather_code;
+      
       let wText = '快晴';
       if (code >= 1 && code <= 3) wText = '晴れ時々曇り';
       else if (code >= 51 && code <= 67) wText = 'にわか雨';
       else if (code >= 71) wText = '雪';
       document.getElementById('weather-desc-text').innerText = wText;
+      
+      // 【智能替換日本天氣 Icon】
+      document.getElementById('weather-cloud-icon').innerText = getJpWeatherIcon(code);
       
       const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=35.726&longitude=139.713&hourly=temperature_2m,precipitation_probability&timezone=Asia%2FTokyo&forecast_days=2&_=${Date.now()}`);
       if (omRes.ok) {
@@ -646,7 +663,6 @@
 
   function renderJPTabs() { document.getElementById('transit-tabs-bar').innerHTML = `<button class="filter-chip active">すべて</button>`; }
 
-  // 輔助函數：解析 ODPT 班次
   function getNextOdptTrains(timetables, directionStr, count=3) {
       const tb = timetables.find(t => t['odpt:railDirection'] === directionStr);
       if(!tb) return ['--:--','--:--','--:--'];
@@ -662,7 +678,7 @@
   async function fetchJPTransitData() {
     document.getElementById('transit-title-text').innerText = '電車運行情報';
     
-    if (!ODPT_TOKEN) {
+    if (!ODPT_TOKEN || ODPT_TOKEN.includes('請在此貼上')) {
         document.getElementById('transit-items-list').innerHTML = `
           <div style="text-align:center; padding: 40px; color:#888;">
             <span style="font-size:24px;">🚫</span><br><br>
@@ -674,7 +690,6 @@
     }
 
     try {
-        // 真實解析：東京地下鐵 副都心線 雑司が谷駅
         const fukuRes = await fetchWithTimeout(`https://api.odpt.org/api/v4/odpt:StationTimetable?odpt:station=odpt.Station:TokyoMetro.Fukutoshin.Zoshigaya&acl:consumerKey=${ODPT_TOKEN}`);
         if (!fukuRes.ok) throw new Error('Token Invalid');
         const fukuData = await fukuRes.json();
@@ -682,7 +697,6 @@
         let sTime = getNextOdptTrains(fukuData, 'odpt.RailDirection:TokyoMetro.Shibuya');
         let nTime = getNextOdptTrains(fukuData, 'odpt.RailDirection:TokyoMetro.Wakoshi');
 
-        // 其他路線示範靜態框 (需知特定 ID 方可擴展)
         document.getElementById('transit-items-list').innerHTML = `
           <div class="transit-card-item" style="border-left: 5px solid #9c5e31;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#9c5e31; font-size:18px;">副都心 南行</div><div class="dest-col"><span class="dest-name">新宿三丁目・渋谷・横浜 方面</span><span class="stop-name">🚉 雑司が谷駅 (1番線)</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> 時刻表</div><div class="eta-clock">${sTime[0]}</div></div></div><div class="transit-card-sub">次発: ${sTime[1]} | 次々発: ${sTime[2]}</div></div>
           <div class="transit-card-item" style="border-left: 5px solid #9c5e31;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#9c5e31; font-size:18px;">副都心 北行</div><div class="dest-col"><span class="dest-name">池袋・和光市・森林公園 方面</span><span class="stop-name">🚉 雑司が谷駅 (2番線)</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> 時刻表</div><div class="eta-clock">${nTime[0]}</div></div></div><div class="transit-card-sub">次発: ${nTime[1]} | 次々発: ${nTime[2]}</div></div>
@@ -755,7 +769,6 @@
   }
 
   function toggleRegion() { 
-    // 解決切換地區唔自動停電台嘅 Bug
     if(isPlaying) toggleAudioStream(); 
     
     currentMode = (currentMode === 'HK') ? 'JP' : 'HK'; 
