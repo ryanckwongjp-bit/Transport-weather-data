@@ -142,7 +142,8 @@
         </div>
         <div class="weather-capsule-row">
           <div><span id="lbl-humidity-title" class="hl-cyan-text">💧 相對濕度</span> <strong id="humidity-val-text" class="capsule-val" style="color:#222;">--%</strong></div>
-          <div><span id="lbl-rain-title" class="hl-pink-text">☔ 降雨概率</span> <strong id="rain-val-text" class="hl-pink-text capsule-val">--</strong></div>
+          <!-- 降雨概率：已改為純數字百分比 -->
+          <div><span id="lbl-rain-title" class="hl-pink-text">☔ 降雨概率</span> <strong id="rain-val-text" class="hl-pink-text capsule-val">--%</strong></div>
         </div>
       </div>
       
@@ -250,7 +251,6 @@
     }
   }
 
-  // 完美防護版：加入 .catch() 防止單一城巴車站死機拖冧全局
   async function resolveBusStops() {
     if (BUS_STOPS_RESOLVED) return;
     const cached = localStorage.getItem('busStopCache_v2');
@@ -284,7 +284,7 @@
                fetchWithTimeout(`https://rt.data.gov.hk/v2/transport/citybus/stop/${s.stop}?_=${Date.now()}`)
                .then(r=>r.json())
                .then(stJson => ({id: s.stop, name: stJson.data.name_tc}))
-               .catch(() => ({id: s.stop, name: ''})) // 🛡️ 極重要防護：防止單一車站 API 錯誤中斷 Promise.all
+               .catch(() => ({id: s.stop, name: ''}))
            );
            const resolvedStops = await Promise.all(stopPromises);
            const match = resolvedStops.find(s => s.name.includes(cfg.stopKw));
@@ -442,6 +442,7 @@
     }
   }
 
+  // === 香港天氣 (數值化降雨概率升級) ===
   async function fetchHKWeatherData() {
     document.getElementById('weather-card-title').innerText = '屯門即時與分時天氣';
     document.getElementById('loc-display-title').innerText = '屯門區 🎯';
@@ -465,13 +466,19 @@
         if (today) {
           document.getElementById('weather-desc-text').innerText = today.forecastWeather;
           document.getElementById('temp-range-text').innerText = `今日預測：${today.forecastMintemp?.value} - ${today.forecastMaxtemp?.value}°C`;
-          document.getElementById('rain-val-text').innerText = today.PSR || '低'; 
         }
       }
       
-      const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=22.39&longitude=113.97&hourly=temperature_2m,precipitation_probability&timezone=Asia%2FHong_Kong&forecast_days=2&_=${Date.now()}`);
+      // Open-Meteo 同步抓取逐時天氣 + 今日最高降雨概率 (數值化百分比)
+      const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=22.39&longitude=113.97&hourly=temperature_2m,precipitation_probability&daily=precipitation_probability_max&timezone=Asia%2FHong_Kong&forecast_days=2&_=${Date.now()}`);
       if (omRes.ok) {
         const omData = await omRes.json();
+        
+        // ☔ 將降雨概率替換為精準數字百分比 (例如 15%)
+        if (omData.daily && omData.daily.precipitation_probability_max && omData.daily.precipitation_probability_max.length > 0) {
+          document.getElementById('rain-val-text').innerText = `${omData.daily.precipitation_probability_max[0]}%`;
+        }
+
         let hourlyHtml = '';
         const p = getTzTimeObj('Asia/Hong_Kong');
         const nowIso = `${p.year}-${p.month}-${p.day}T${p.hour}:00`;
@@ -668,7 +675,6 @@
 
   function renderJPTabs() { document.getElementById('transit-tabs-bar').innerHTML = `<button class="filter-chip active">すべて</button>`; }
 
-  // 🛡️ 日本鐵路平假日智能切換 + 深夜時段 (25:00) 修復
   function getNextOdptTrains(timetables, directionStr, count=3) {
       const jpDate = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
       const day = jpDate.getDay();
@@ -680,7 +686,7 @@
       
       const p = getTzTimeObj('Asia/Tokyo');
       let h = parseInt(p.hour);
-      if (h < 4) h += 24; // 凌晨 0-3 點轉換為日本深夜制 (24-27)
+      if (h < 4) h += 24; 
       const nowTimeStr = `${String(h).padStart(2,'0')}:${p.minute}`;
       
       const upcoming = (tb['odpt:stationTimetableObject'] || [])
