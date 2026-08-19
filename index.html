@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Smart Live Dashboard</title>
+<!-- 鎖定穩定版 HLS.js，防止上游改版拖冧系統 -->
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
 <style>
   :root {
@@ -45,6 +46,7 @@
   .update-bar-container { width: 100%; height: 3px; background: #ffe0e6; border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
   .update-bar { height: 100%; background: #009688; width: 0%; transition: width 1s linear; }
 
+  /* 天氣 */
   .weather-loc-row { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
   .loc-title { font-size: 20px; font-weight: 900; color: #222; }
   .weather-status-pill { background: #e0f7fa; color: #00838f; font-size: 13px; font-weight: 800; padding: 4px 10px; border-radius: 14px; text-align: center; }
@@ -59,6 +61,7 @@
   .hl-pink-text { color: var(--accent-pink); font-weight: 900; font-size: 14px; }
   .capsule-val { font-size: 18px; font-weight: 900; margin-left: 4px; }
 
+  /* 逐時天氣 (真實 Open-Meteo 數據) */
   .hourly-forecast-box { margin-top: 6px; border-top: 1px dashed var(--border-pink); padding-top: 6px; }
   .hourly-title-row { display: flex; justify-content: space-between; font-size: 13px; color: #222; margin-bottom: 6px; font-weight: 800; }
   .hourly-slots { display: flex; justify-content: space-between; text-align: center; padding: 0; }
@@ -67,6 +70,7 @@
   .h-temp { font-size: 16px; color: #ffb100; font-weight: 900; line-height: 1.1; }
   .h-rain { font-size: 11px; color: var(--accent-pink); font-weight: 800; }
 
+  /* 交通 */
   .transit-filter-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 6px; }
   .filter-chip { background: #f0f0f0; border: none; padding: 6px 12px; border-radius: 16px; font-size: 12px; font-weight: 800; color: #555; cursor: pointer; white-space: nowrap; }
   .filter-chip.active { background: #009688; color: #fff; }
@@ -86,6 +90,7 @@
   .eta-clock { font-size: 12px; color: #777; font-weight: 800; }
   .transit-card-sub { margin-top: 5px; padding-top: 5px; border-top: 1.5px dotted #e2e2e2; font-size: 11px; color: #666; text-align: right; font-weight: 700; }
 
+  /* 電台 */
   .radio-bar { background: #ffffff; border-radius: 25px; border: 2px solid var(--border-pink); padding: 8px 18px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
   .radio-info { display: flex; align-items: center; gap: 8px; }
   .radio-name { font-size: 15px; font-weight: 900; color: #222; }
@@ -94,6 +99,7 @@
   .station-chip { background: #f5f5f5; border: 1.5px solid #ddd; padding: 6px 14px; border-radius: 18px; font-size: 13px; font-weight: 800; cursor: pointer; white-space: nowrap; color: #555; }
   .station-chip.active { background: var(--accent-pink); color: #fff; border-color: var(--accent-pink); }
   .btn-play-ctrl { background: #00c853; color: #fff; border: none; padding: 8px 20px; border-radius: 20px; font-size: 14px; font-weight: 900; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  
   .api-error { color: #f44336; font-size: 10px; margin-top: 2px; display: none; }
 </style>
 </head>
@@ -132,7 +138,6 @@
             <div class="temp-display"><span id="temp-val-num">--</span><span class="temp-deg">°</span></div>
             <div class="temp-forecast-text" id="temp-range-text">今日預測：-- - --°C</div>
           </div>
-          <!-- 這個 Icon 現在會自動變換！ -->
           <div class="weather-icon-right" id="weather-cloud-icon">⛅</div>
         </div>
         <div class="weather-capsule-row">
@@ -245,6 +250,7 @@
     }
   }
 
+  // 完美防護版：加入 .catch() 防止單一城巴車站死機拖冧全局
   async function resolveBusStops() {
     if (BUS_STOPS_RESOLVED) return;
     const cached = localStorage.getItem('busStopCache_v2');
@@ -275,7 +281,10 @@
            const rs = await fetchWithTimeout(`https://rt.data.gov.hk/v2/transport/citybus/route-stop/CTB/${cfg.route}/${cfg.bound}?_=${Date.now()}`);
            const rsJson = await rs.json();
            const stopPromises = (rsJson.data || []).map(s => 
-               fetchWithTimeout(`https://rt.data.gov.hk/v2/transport/citybus/stop/${s.stop}?_=${Date.now()}`).then(r=>r.json()).then(stJson => ({id: s.stop, name: stJson.data.name_tc}))
+               fetchWithTimeout(`https://rt.data.gov.hk/v2/transport/citybus/stop/${s.stop}?_=${Date.now()}`)
+               .then(r=>r.json())
+               .then(stJson => ({id: s.stop, name: stJson.data.name_tc}))
+               .catch(() => ({id: s.stop, name: ''})) // 🛡️ 極重要防護：防止單一車站 API 錯誤中斷 Promise.all
            );
            const resolvedStops = await Promise.all(stopPromises);
            const match = resolvedStops.find(s => s.name.includes(cfg.stopKw));
@@ -340,7 +349,6 @@
     }
   }
 
-  // 轉換香港天文台 Icon
   function getHkWeatherIcon(code) {
       if (!code) return '⛅';
       if (code >= 50 && code <= 52) return '☀️'; 
@@ -351,7 +359,6 @@
       return '⛅';
   }
 
-  // 轉換 Open-Meteo Icon
   function getJpWeatherIcon(code) {
       if (code === 0) return '☀️'; 
       if (code === 1 || code === 2) return '⛅'; 
@@ -447,7 +454,6 @@
         const hum = data.humidity?.data?.[0]?.value;
         if (hum) document.getElementById('humidity-val-text').innerText = `${hum}%`;
         
-        // 【智能替換香港天氣 Icon】
         if (data.icon && data.icon.length > 0) {
             document.getElementById('weather-cloud-icon').innerText = getHkWeatherIcon(data.icon[0]);
         }
@@ -636,7 +642,6 @@
       else if (code >= 71) wText = '雪';
       document.getElementById('weather-desc-text').innerText = wText;
       
-      // 【智能替換日本天氣 Icon】
       document.getElementById('weather-cloud-icon').innerText = getJpWeatherIcon(code);
       
       const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=35.726&longitude=139.713&hourly=temperature_2m,precipitation_probability&timezone=Asia%2FTokyo&forecast_days=2&_=${Date.now()}`);
@@ -663,14 +668,29 @@
 
   function renderJPTabs() { document.getElementById('transit-tabs-bar').innerHTML = `<button class="filter-chip active">すべて</button>`; }
 
+  // 🛡️ 日本鐵路平假日智能切換 + 深夜時段 (25:00) 修復
   function getNextOdptTrains(timetables, directionStr, count=3) {
-      const tb = timetables.find(t => t['odpt:railDirection'] === directionStr);
-      if(!tb) return ['--:--','--:--','--:--'];
+      const jpDate = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+      const day = jpDate.getDay();
+      const calType = (day === 0 || day === 6) ? 'odpt.Calendar:SaturdayHoliday' : 'odpt.Calendar:Weekday';
+      
+      let tb = timetables.find(t => t['odpt:railDirection'] === directionStr && t['odpt:calendar'] === calType);
+      if (!tb) tb = timetables.find(t => t['odpt:railDirection'] === directionStr); 
+      if (!tb) return ['--:--','--:--','--:--'];
+      
       const p = getTzTimeObj('Asia/Tokyo');
-      const nowTimeStr = `${p.hour}:${p.minute}`;
+      let h = parseInt(p.hour);
+      if (h < 4) h += 24; // 凌晨 0-3 點轉換為日本深夜制 (24-27)
+      const nowTimeStr = `${String(h).padStart(2,'0')}:${p.minute}`;
+      
       const upcoming = (tb['odpt:stationTimetableObject'] || [])
           .filter(o => o['odpt:departureTime'] >= nowTimeStr)
-          .map(o => o['odpt:departureTime']);
+          .map(o => {
+              let dTime = o['odpt:departureTime'];
+              let [dh, dm] = dTime.split(':');
+              if (parseInt(dh) >= 24) dTime = `${String(parseInt(dh)-24).padStart(2,'0')}:${dm}`;
+              return dTime;
+          });
       while(upcoming.length < count) upcoming.push('--:--');
       return upcoming.slice(0, count);
   }
