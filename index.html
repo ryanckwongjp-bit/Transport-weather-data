@@ -61,7 +61,7 @@
   .hl-pink-text { color: var(--accent-pink); font-weight: 900; font-size: 14px; }
   .capsule-val { font-size: 18px; font-weight: 900; margin-left: 4px; }
 
-  /* 逐時天氣 (真實 Open-Meteo 數據) */
+  /* 逐時天氣 */
   .hourly-forecast-box { margin-top: 6px; border-top: 1px dashed var(--border-pink); padding-top: 6px; }
   .hourly-title-row { display: flex; justify-content: space-between; font-size: 13px; color: #222; margin-bottom: 6px; font-weight: 800; }
   .hourly-slots { display: flex; justify-content: space-between; text-align: center; padding: 0; }
@@ -142,7 +142,6 @@
         </div>
         <div class="weather-capsule-row">
           <div><span id="lbl-humidity-title" class="hl-cyan-text">💧 相對濕度</span> <strong id="humidity-val-text" class="capsule-val" style="color:#222;">--%</strong></div>
-          <!-- 降雨概率：已改為純數字百分比 -->
           <div><span id="lbl-rain-title" class="hl-pink-text">☔ 降雨概率</span> <strong id="rain-val-text" class="hl-pink-text capsule-val">--%</strong></div>
         </div>
       </div>
@@ -442,7 +441,7 @@
     }
   }
 
-  // === 香港天氣 (數值化降雨概率升級) ===
+  // === 香港天氣 (修復降雨概率衝突) ===
   async function fetchHKWeatherData() {
     document.getElementById('weather-card-title').innerText = '屯門即時與分時天氣';
     document.getElementById('loc-display-title').innerText = '屯門區 🎯';
@@ -469,21 +468,17 @@
         }
       }
       
-      // Open-Meteo 同步抓取逐時天氣 + 今日最高降雨概率 (數值化百分比)
-      const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=22.39&longitude=113.97&hourly=temperature_2m,precipitation_probability&daily=precipitation_probability_max&timezone=Asia%2FHong_Kong&forecast_days=2&_=${Date.now()}`);
+      const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=22.39&longitude=113.97&hourly=temperature_2m,precipitation_probability&timezone=Asia%2FHong_Kong&forecast_days=2&_=${Date.now()}`);
       if (omRes.ok) {
         const omData = await omRes.json();
-        
-        // ☔ 將降雨概率替換為精準數字百分比 (例如 15%)
-        if (omData.daily && omData.daily.precipitation_probability_max && omData.daily.precipitation_probability_max.length > 0) {
-          document.getElementById('rain-val-text').innerText = `${omData.daily.precipitation_probability_max[0]}%`;
-        }
-
         let hourlyHtml = '';
         const p = getTzTimeObj('Asia/Hong_Kong');
         const nowIso = `${p.year}-${p.month}-${p.day}T${p.hour}:00`;
         let startIndex = omData.hourly.time.findIndex(t => t >= nowIso);
         if (startIndex === -1) startIndex = 0;
+        
+        // 🔥 解決衝突：膠囊區直接綁定並顯示「現時這一個小時」的精準降雨概率
+        document.getElementById('rain-val-text').innerText = `${omData.hourly.precipitation_probability[startIndex]}%`;
         
         for(let i=0; i<6; i++) {
           const idx = startIndex + i;
@@ -611,7 +606,7 @@
               for (let i = 1; i < Math.min(3, validEtas.length); i++) {
                   const sMs = new Date(validEtas[i].eta).getTime();
                   const sDiff = Math.floor((sMs - Date.now()) / 60000);
-                  const sTxt = sDiff <= 0 ? '即將' : sDiff + '分';
+                  const sTxt = sDiff <= 0 ? '即即' : sDiff + '分';
                   let sIco = (validEtas[i].rmk && validEtas[i].rmk.includes('原定')) ? '🗓️' : '';
                   subs.push(`${sIco}<span class="eta-sub-text" data-eta="${sMs}">${sTxt}</span>`);
               }
@@ -630,35 +625,38 @@
     container.innerHTML = cardsHtml;
   }
 
-  // === 日本天氣與交通 ===
+  // === 日本天氣與交通 (二合一極速優化與同步概率) ===
   async function fetchJPWeatherData() {
     document.getElementById('weather-card-title').innerText = '東京リアルタイム天気';
     document.getElementById('loc-display-title').innerText = '豊島区 雑司が谷 🎯';
     try {
-      const res = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=35.726&longitude=139.713&current=temperature_2m,relative_humidity_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo&_=${Date.now()}`);
-      const data = await res.json();
-      document.getElementById('temp-val-num').innerText = Math.round(data.current.temperature_2m);
-      document.getElementById('humidity-val-text').innerText = `${data.current.relative_humidity_2m}%`;
-      document.getElementById('temp-range-text').innerText = `今日の予報：${Math.round(data.daily.temperature_2m_min[0])} - ${Math.round(data.daily.temperature_2m_max[0])}°C`;
-      document.getElementById('rain-val-text').innerText = `${data.daily.precipitation_probability_max[0]}%`;
-      const code = data.current.weather_code;
-      
-      let wText = '快晴';
-      if (code >= 1 && code <= 3) wText = '晴れ時々曇り';
-      else if (code >= 51 && code <= 67) wText = 'にわか雨';
-      else if (code >= 71) wText = '雪';
-      document.getElementById('weather-desc-text').innerText = wText;
-      
-      document.getElementById('weather-cloud-icon').innerText = getJpWeatherIcon(code);
-      
-      const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=35.726&longitude=139.713&hourly=temperature_2m,precipitation_probability&timezone=Asia%2FTokyo&forecast_days=2&_=${Date.now()}`);
+      // 合併請求，加快載入速度
+      const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=35.726&longitude=139.713&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&forecast_days=2&_=${Date.now()}`);
       if (omRes.ok) {
         const omData = await omRes.json();
+        
+        // 頂部當前天氣設定
+        document.getElementById('temp-val-num').innerText = Math.round(omData.current.temperature_2m);
+        document.getElementById('humidity-val-text').innerText = `${omData.current.relative_humidity_2m}%`;
+        document.getElementById('temp-range-text').innerText = `今日の予報：${Math.round(omData.daily.temperature_2m_min[0])} - ${Math.round(omData.daily.temperature_2m_max[0])}°C`;
+        
+        const code = omData.current.weather_code;
+        let wText = '快晴';
+        if (code >= 1 && code <= 3) wText = '晴れ時々曇り';
+        else if (code >= 51 && code <= 67) wText = 'にわか雨';
+        else if (code >= 71) wText = '雪';
+        document.getElementById('weather-desc-text').innerText = wText;
+        document.getElementById('weather-cloud-icon').innerText = getJpWeatherIcon(code);
+        
+        // 逐時預測及降雨概率同步
         let hourlyHtml = '';
         const p = getTzTimeObj('Asia/Tokyo');
         const nowIso = `${p.year}-${p.month}-${p.day}T${p.hour}:00`;
         let startIndex = omData.hourly.time.findIndex(t => t >= nowIso);
         if (startIndex === -1) startIndex = 0;
+        
+        // 🔥 解決衝突：膠囊區直接綁定並顯示「現時這一個小時」的精準降雨概率
+        document.getElementById('rain-val-text').innerText = `${omData.hourly.precipitation_probability[startIndex]}%`;
         
         for(let i=0; i<6; i++) {
           const idx = startIndex + i;
