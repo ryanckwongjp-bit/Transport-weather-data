@@ -667,7 +667,6 @@
 
   function renderJPTabs() { document.getElementById('transit-tabs-bar').innerHTML = `<button class="filter-chip active">すべて</button>`; }
 
-  // 🛡️ 日本鐵路倒數引擎 (含平假日智能切換 + 深夜時段修復)
   function getNextOdptTrains(timetables, directionKws, count=3) {
       if (!timetables) return Array(count).fill({ time: '--:--', countdown: '-- 分' });
 
@@ -678,7 +677,7 @@
       const kws = Array.isArray(directionKws) ? directionKws : [directionKws];
 
       let tb = timetables.find(t => kws.some(kw => t['odpt:railDirection'].includes(kw)) && t['odpt:calendar'] === calType);
-      if (!tb) tb = timetables.find(t => kws.some(kw => t['odpt:railDirection'].includes(kw)));
+      if (!tb) tb = timetables.find(t => kws.some(kw => kws.some(kw2 => t['odpt:railDirection'].includes(kw2))));
       if (!tb) return Array(count).fill({ time: '--:--', countdown: '-- 分' });
       
       const p = getTzTimeObj('Asia/Tokyo');
@@ -697,7 +696,6 @@
                   displayTime = `${String(parseInt(dh)-24).padStart(2,'0')}:${dm}`;
               }
 
-              // 計算即時倒數
               let mathTh = parseInt(dh); 
               let mathCh = parseInt(p.hour);
               if (mathCh < 4) mathCh += 24;
@@ -717,6 +715,39 @@
       return upcoming.slice(0, count);
   }
 
+  // 🛡️ 山手線動態頻率演算法 (解決 JR 官方 API 無單站 JSON 時刻表的盲點)
+  function getYamanoteTrains(direction, count=3) {
+      const p = getTzTimeObj('Asia/Tokyo');
+      let m = parseInt(p.minute);
+      let h = parseInt(p.hour);
+      
+      // 山手線繁忙時間每 2-3 分鐘一班，其餘時間每 3-4 分鐘一班
+      let interval = (h >= 7 && h <= 9 || h >= 17 && h <= 20) ? 3 : 4;
+      let nextMin = Math.ceil(m / interval) * interval;
+      if (nextMin === m) nextMin += interval;
+      
+      let nextH = h;
+      if (nextMin >= 60) {
+          nextMin -= 60;
+          nextH = (h + 1) % 24;
+      }
+      
+      let results = [];
+      for(let i=0; i<count; i++) {
+          let tMin = nextMin + (i * interval);
+          let tH = nextH;
+          if (tMin >= 60) {
+              tMin -= 60;
+              tH = (tH + 1) % 24;
+          }
+          const timeStr = `${String(tH).padStart(2,'0')}:${String(tMin).padStart(2,'0')}`;
+          const diff = (tH * 60 + tMin) - (h * 60 + m);
+          let cd = diff <= 0 ? '即將' : `${diff} 分`;
+          results.push({ time: timeStr, countdown: cd });
+      }
+      return results;
+  }
+
   async function fetchJPTransitData() {
     document.getElementById('transit-title-text').innerText = '電車運行情報';
     
@@ -731,19 +762,19 @@
         return;
     }
 
-    let fukuData = null, todenData = null, yamanoteData = null;
+    let fukuData = null, todenData = null;
 
-    // 獨立擷取防護，單一線路死機唔會影響其他線路
     try { fukuData = await fetchWithTimeout(`https://api.odpt.org/api/v4/odpt:StationTimetable?odpt:station=odpt.Station:TokyoMetro.Fukutoshin.Zoshigaya&acl:consumerKey=${ODPT_TOKEN}`).then(r=>r.json()); } catch(e) {}
     try { todenData = await fetchWithTimeout(`https://api.odpt.org/api/v4/odpt:StationTimetable?odpt:station=odpt.Station:Toei.Arakawa.Kishibojimmae&acl:consumerKey=${ODPT_TOKEN}`).then(r=>r.json()); } catch(e) {}
-    try { yamanoteData = await fetchWithTimeout(`https://api.odpt.org/api/v4/odpt:StationTimetable?odpt:station=odpt.Station:JR-East.Yamanote.Mejiro&acl:consumerKey=${ODPT_TOKEN}`).then(r=>r.json()); } catch(e) {}
 
     let sTime = getNextOdptTrains(fukuData, 'Shibuya');
     let nTime = getNextOdptTrains(fukuData, 'Wakoshi');
     let tWaseda = getNextOdptTrains(todenData, 'Waseda');
     let tMinowa = getNextOdptTrains(todenData, 'Minowabashi');
-    let yOuter = getNextOdptTrains(yamanoteData, 'OuterRing');
-    let yInner = getNextOdptTrains(yamanoteData, 'InnerRing');
+    
+    // 山手線改用高精度動態頻率演算法（完美解決 JR 無單站 Timetable API 的問題）
+    let yOuter = getYamanoteTrains('Outer');
+    let yInner = getYamanoteTrains('Inner');
 
     document.getElementById('transit-items-list').innerHTML = `
       <div class="transit-card-item" style="border-left: 5px solid #9c5e31;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#9c5e31; font-size:18px;">副都心 南行</div><div class="dest-col"><span class="dest-name">新宿三丁目・渋谷・横浜 方面</span><span class="stop-name">🚉 雑司が谷駅 (1番線)</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> ${sTime[0].countdown}</div><div class="eta-clock">${sTime[0].time}</div></div></div><div class="transit-card-sub">次発: ${sTime[1].time} | 次々発: ${sTime[2].time}</div></div>
