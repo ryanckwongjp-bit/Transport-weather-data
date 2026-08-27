@@ -441,7 +441,6 @@
     }
   }
 
-  // === 香港天氣 (修復降雨概率衝突) ===
   async function fetchHKWeatherData() {
     document.getElementById('weather-card-title').innerText = '屯門即時與分時天氣';
     document.getElementById('loc-display-title').innerText = '屯門區 🎯';
@@ -477,7 +476,6 @@
         let startIndex = omData.hourly.time.findIndex(t => t >= nowIso);
         if (startIndex === -1) startIndex = 0;
         
-        // 🔥 解決衝突：膠囊區直接綁定並顯示「現時這一個小時」的精準降雨概率
         document.getElementById('rain-val-text').innerText = `${omData.hourly.precipitation_probability[startIndex]}%`;
         
         for(let i=0; i<6; i++) {
@@ -606,7 +604,7 @@
               for (let i = 1; i < Math.min(3, validEtas.length); i++) {
                   const sMs = new Date(validEtas[i].eta).getTime();
                   const sDiff = Math.floor((sMs - Date.now()) / 60000);
-                  const sTxt = sDiff <= 0 ? '即即' : sDiff + '分';
+                  const sTxt = sDiff <= 0 ? '即將' : sDiff + '分';
                   let sIco = (validEtas[i].rmk && validEtas[i].rmk.includes('原定')) ? '🗓️' : '';
                   subs.push(`${sIco}<span class="eta-sub-text" data-eta="${sMs}">${sTxt}</span>`);
               }
@@ -625,17 +623,15 @@
     container.innerHTML = cardsHtml;
   }
 
-  // === 日本天氣與交通 (二合一極速優化與同步概率) ===
+  // === 日本天氣與交通 ===
   async function fetchJPWeatherData() {
     document.getElementById('weather-card-title').innerText = '東京リアルタイム天気';
     document.getElementById('loc-display-title').innerText = '豊島区 雑司が谷 🎯';
     try {
-      // 合併請求，加快載入速度
       const omRes = await fetchWithTimeout(`https://api.open-meteo.com/v1/forecast?latitude=35.726&longitude=139.713&current=temperature_2m,relative_humidity_2m,weather_code&hourly=temperature_2m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&forecast_days=2&_=${Date.now()}`);
       if (omRes.ok) {
         const omData = await omRes.json();
         
-        // 頂部當前天氣設定
         document.getElementById('temp-val-num').innerText = Math.round(omData.current.temperature_2m);
         document.getElementById('humidity-val-text').innerText = `${omData.current.relative_humidity_2m}%`;
         document.getElementById('temp-range-text').innerText = `今日の予報：${Math.round(omData.daily.temperature_2m_min[0])} - ${Math.round(omData.daily.temperature_2m_max[0])}°C`;
@@ -648,14 +644,12 @@
         document.getElementById('weather-desc-text').innerText = wText;
         document.getElementById('weather-cloud-icon').innerText = getJpWeatherIcon(code);
         
-        // 逐時預測及降雨概率同步
         let hourlyHtml = '';
         const p = getTzTimeObj('Asia/Tokyo');
         const nowIso = `${p.year}-${p.month}-${p.day}T${p.hour}:00`;
         let startIndex = omData.hourly.time.findIndex(t => t >= nowIso);
         if (startIndex === -1) startIndex = 0;
         
-        // 🔥 解決衝突：膠囊區直接綁定並顯示「現時這一個小時」的精準降雨概率
         document.getElementById('rain-val-text').innerText = `${omData.hourly.precipitation_probability[startIndex]}%`;
         
         for(let i=0; i<6; i++) {
@@ -673,14 +667,19 @@
 
   function renderJPTabs() { document.getElementById('transit-tabs-bar').innerHTML = `<button class="filter-chip active">すべて</button>`; }
 
-  function getNextOdptTrains(timetables, directionStr, count=3) {
+  // 🛡️ 日本鐵路倒數引擎 (含平假日智能切換 + 深夜時段修復)
+  function getNextOdptTrains(timetables, directionKws, count=3) {
+      if (!timetables) return Array(count).fill({ time: '--:--', countdown: '-- 分' });
+
       const jpDate = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
       const day = jpDate.getDay();
       const calType = (day === 0 || day === 6) ? 'odpt.Calendar:SaturdayHoliday' : 'odpt.Calendar:Weekday';
       
-      let tb = timetables.find(t => t['odpt:railDirection'] === directionStr && t['odpt:calendar'] === calType);
-      if (!tb) tb = timetables.find(t => t['odpt:railDirection'] === directionStr); 
-      if (!tb) return ['--:--','--:--','--:--'];
+      const kws = Array.isArray(directionKws) ? directionKws : [directionKws];
+
+      let tb = timetables.find(t => kws.some(kw => t['odpt:railDirection'].includes(kw)) && t['odpt:calendar'] === calType);
+      if (!tb) tb = timetables.find(t => kws.some(kw => t['odpt:railDirection'].includes(kw)));
+      if (!tb) return Array(count).fill({ time: '--:--', countdown: '-- 分' });
       
       const p = getTzTimeObj('Asia/Tokyo');
       let h = parseInt(p.hour);
@@ -692,10 +691,29 @@
           .map(o => {
               let dTime = o['odpt:departureTime'];
               let [dh, dm] = dTime.split(':');
-              if (parseInt(dh) >= 24) dTime = `${String(parseInt(dh)-24).padStart(2,'0')}:${dm}`;
-              return dTime;
+              let displayTime = dTime;
+              
+              if (parseInt(dh) >= 24) {
+                  displayTime = `${String(parseInt(dh)-24).padStart(2,'0')}:${dm}`;
+              }
+
+              // 計算即時倒數
+              let mathTh = parseInt(dh); 
+              let mathCh = parseInt(p.hour);
+              if (mathCh < 4) mathCh += 24;
+
+              const diff = (mathTh * 60 + parseInt(dm)) - (mathCh * 60 + parseInt(p.minute));
+              let countdown = '-- 分';
+              if (diff >= 0 && diff <= 90) {
+                  countdown = diff === 0 ? '即將' : `${diff} 分`;
+              } else if (diff > 90) {
+                  countdown = '>1小時';
+              }
+
+              return { time: displayTime, countdown: countdown };
           });
-      while(upcoming.length < count) upcoming.push('--:--');
+          
+      while(upcoming.length < count) upcoming.push({ time: '--:--', countdown: '-- 分' });
       return upcoming.slice(0, count);
   }
 
@@ -713,29 +731,28 @@
         return;
     }
 
-    try {
-        const fukuRes = await fetchWithTimeout(`https://api.odpt.org/api/v4/odpt:StationTimetable?odpt:station=odpt.Station:TokyoMetro.Fukutoshin.Zoshigaya&acl:consumerKey=${ODPT_TOKEN}`);
-        if (!fukuRes.ok) throw new Error('Token Invalid');
-        const fukuData = await fukuRes.json();
-        
-        let sTime = getNextOdptTrains(fukuData, 'odpt.RailDirection:TokyoMetro.Shibuya');
-        let nTime = getNextOdptTrains(fukuData, 'odpt.RailDirection:TokyoMetro.Wakoshi');
+    let fukuData = null, todenData = null, yamanoteData = null;
 
-        document.getElementById('transit-items-list').innerHTML = `
-          <div class="transit-card-item" style="border-left: 5px solid #9c5e31;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#9c5e31; font-size:18px;">副都心 南行</div><div class="dest-col"><span class="dest-name">新宿三丁目・渋谷・横浜 方面</span><span class="stop-name">🚉 雑司が谷駅 (1番線)</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> 時刻表</div><div class="eta-clock">${sTime[0]}</div></div></div><div class="transit-card-sub">次発: ${sTime[1]} | 次々発: ${sTime[2]}</div></div>
-          <div class="transit-card-item" style="border-left: 5px solid #9c5e31;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#9c5e31; font-size:18px;">副都心 北行</div><div class="dest-col"><span class="dest-name">池袋・和光市・森林公園 方面</span><span class="stop-name">🚉 雑司が谷駅 (2番線)</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> 時刻表</div><div class="eta-clock">${nTime[0]}</div></div></div><div class="transit-card-sub">次発: ${nTime[1]} | 次々発: ${nTime[2]}</div></div>
-          <div class="transit-card-item" style="border-left: 5px solid #e91e63;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#e91e63; font-size:18px;">都電 路線</div><div class="dest-col"><span class="dest-name">荒川線 方面</span><span class="stop-name">🚏 鬼子母神前 / 雑司ヶ谷</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> 準備中</div><div class="eta-clock">API 接続成功</div></div></div><div class="transit-card-sub">ID 設定待ち</div></div>
-          <div class="transit-card-item" style="border-left: 5px solid #80c342;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#80c342; font-size:18px;">山手 路線</div><div class="dest-col"><span class="dest-name">池袋・新宿 方面</span><span class="stop-name">🚉 目白駅</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> 準備中</div><div class="eta-clock">API 接続成功</div></div></div><div class="transit-card-sub">ID 設定待ち</div></div>
-        `;
-    } catch(e) {
-        document.getElementById('transit-items-list').innerHTML = `
-          <div style="text-align:center; padding: 40px; color:#f44336;">
-            <span style="font-size:24px;">⚠️</span><br><br>
-            <span style="font-weight:bold;">ODPT 接続失敗</span><br>
-            <span style="font-size:12px;">(Token 可能無效或未獲批准)</span>
-          </div>
-        `;
-    }
+    // 獨立擷取防護，單一線路死機唔會影響其他線路
+    try { fukuData = await fetchWithTimeout(`https://api.odpt.org/api/v4/odpt:StationTimetable?odpt:station=odpt.Station:TokyoMetro.Fukutoshin.Zoshigaya&acl:consumerKey=${ODPT_TOKEN}`).then(r=>r.json()); } catch(e) {}
+    try { todenData = await fetchWithTimeout(`https://api.odpt.org/api/v4/odpt:StationTimetable?odpt:station=odpt.Station:Toei.Arakawa.Kishibojimmae&acl:consumerKey=${ODPT_TOKEN}`).then(r=>r.json()); } catch(e) {}
+    try { yamanoteData = await fetchWithTimeout(`https://api.odpt.org/api/v4/odpt:StationTimetable?odpt:station=odpt.Station:JR-East.Yamanote.Mejiro&acl:consumerKey=${ODPT_TOKEN}`).then(r=>r.json()); } catch(e) {}
+
+    let sTime = getNextOdptTrains(fukuData, 'Shibuya');
+    let nTime = getNextOdptTrains(fukuData, 'Wakoshi');
+    let tWaseda = getNextOdptTrains(todenData, 'Waseda');
+    let tMinowa = getNextOdptTrains(todenData, 'Minowabashi');
+    let yOuter = getNextOdptTrains(yamanoteData, 'OuterRing');
+    let yInner = getNextOdptTrains(yamanoteData, 'InnerRing');
+
+    document.getElementById('transit-items-list').innerHTML = `
+      <div class="transit-card-item" style="border-left: 5px solid #9c5e31;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#9c5e31; font-size:18px;">副都心 南行</div><div class="dest-col"><span class="dest-name">新宿三丁目・渋谷・横浜 方面</span><span class="stop-name">🚉 雑司が谷駅 (1番線)</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> ${sTime[0].countdown}</div><div class="eta-clock">${sTime[0].time}</div></div></div><div class="transit-card-sub">次発: ${sTime[1].time} | 次々発: ${sTime[2].time}</div></div>
+      <div class="transit-card-item" style="border-left: 5px solid #9c5e31;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#9c5e31; font-size:18px;">副都心 北行</div><div class="dest-col"><span class="dest-name">池袋・和光市・森林公園 方面</span><span class="stop-name">🚉 雑司が谷駅 (2番線)</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> ${nTime[0].countdown}</div><div class="eta-clock">${nTime[0].time}</div></div></div><div class="transit-card-sub">次発: ${nTime[1].time} | 次々発: ${nTime[2].time}</div></div>
+      <div class="transit-card-item" style="border-left: 5px solid #e91e63;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#e91e63; font-size:18px;">都電 路線</div><div class="dest-col"><span class="dest-name">早稲田 方面</span><span class="stop-name">🚏 鬼子母神前 / 雑司ヶ谷</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> ${tWaseda[0].countdown}</div><div class="eta-clock">${tWaseda[0].time}</div></div></div><div class="transit-card-sub">次発: ${tWaseda[1].time} | 次々発: ${tWaseda[2].time}</div></div>
+      <div class="transit-card-item" style="border-left: 5px solid #e91e63;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#e91e63; font-size:18px;">都電 路線</div><div class="dest-col"><span class="dest-name">大塚・王子・三ノ輪橋 方面</span><span class="stop-name">🚏 鬼子母神前 / 雑司ヶ谷</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> ${tMinowa[0].countdown}</div><div class="eta-clock">${tMinowa[0].time}</div></div></div><div class="transit-card-sub">次発: ${tMinowa[1].time} | 次々発: ${tMinowa[2].time}</div></div>
+      <div class="transit-card-item" style="border-left: 5px solid #80c342;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#80c342; font-size:18px;">山手 外回り</div><div class="dest-col"><span class="dest-name">池袋・上野 方面</span><span class="stop-name">🚉 目白駅 (1番線)</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> ${yOuter[0].countdown}</div><div class="eta-clock">${yOuter[0].time}</div></div></div><div class="transit-card-sub">次発: ${yOuter[1].time} | 次々発: ${yOuter[2].time}</div></div>
+      <div class="transit-card-item" style="border-left: 5px solid #80c342;"><div class="transit-card-main"><div class="transit-left"><div class="route-pill" style="background:#80c342; font-size:18px;">山手 内回り</div><div class="dest-col"><span class="dest-name">新宿・渋谷 方面</span><span class="stop-name">🚉 目白駅 (2番線)</span></div></div><div class="transit-right"><div class="eta-number"><span style="font-size:16px;">🗓️</span> ${yInner[0].countdown}</div><div class="eta-clock">${yInner[0].time}</div></div></div><div class="transit-card-sub">次発: ${yInner[1].time} | 次々発: ${yInner[2].time}</div></div>
+    `;
   }
 
   function renderRadioList() {
